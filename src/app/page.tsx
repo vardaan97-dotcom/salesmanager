@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Building2,
   Users,
@@ -9,7 +9,6 @@ import {
   Plus,
   Search,
   Bell,
-  Settings,
   ChevronRight,
   ExternalLink,
   Eye,
@@ -29,25 +28,57 @@ import {
   Filter,
   Download,
   RefreshCw,
+  Key,
+  FileText,
+  Mail,
+  Send,
+  Settings,
+  Share2,
 } from 'lucide-react';
 import { cn, formatCurrency, formatDate, formatRelativeTime } from '@/lib/utils';
 import {
   currentSalesPerson,
   dashboardStats,
-  companies,
+  companies as initialCompanies,
   recentActivity,
   notifications,
   courses,
 } from '@/lib/mockData';
 import type { Company } from '@/types';
 import ClientCustomizer from '@/components/ClientCustomizer';
+import CredentialsManager from '@/components/CredentialsManager';
+import ReportsManager from '@/components/ReportsManager';
+import ClientDetailsModal from '@/components/ClientDetailsModal';
+
+// Get base portal URL for Vercel deployment
+function getBasePortalUrl(): string {
+  if (typeof window !== 'undefined') {
+    const host = window.location.host;
+    if (host.includes('vercel.app')) {
+      return `https://koenig-learner-portal.vercel.app`;
+    }
+    if (host.includes('localhost')) {
+      return 'http://localhost:3000';
+    }
+  }
+  return 'https://koenig-learner-portal.vercel.app';
+}
 
 export default function SalesDashboard() {
   const [activeTab, setActiveTab] = useState<'overview' | 'clients' | 'analytics' | 'courses'>('overview');
   const [searchQuery, setSearchQuery] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
+  const [companies, setCompanies] = useState<Company[]>(initialCompanies);
+
+  // Modal states
   const [selectedClient, setSelectedClient] = useState<Company | null>(null);
   const [showCustomizer, setShowCustomizer] = useState(false);
+  const [showCredentials, setShowCredentials] = useState(false);
+  const [showReports, setShowReports] = useState(false);
+  const [showClientDetails, setShowClientDetails] = useState(false);
+
+  // Toast state
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const unreadNotifications = notifications.filter(n => !n.isRead).length;
 
@@ -56,18 +87,154 @@ export default function SalesDashboard() {
     c.slug.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Show toast notification
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // Handle edit client
   const handleEditClient = (company: Company) => {
     setSelectedClient(company);
+    setShowClientDetails(false);
     setShowCustomizer(true);
   };
 
+  // Handle view client details
+  const handleViewClient = (company: Company) => {
+    setSelectedClient(company);
+    setShowClientDetails(true);
+  };
+
+  // Handle new client
   const handleNewClient = () => {
     setSelectedClient(null);
     setShowCustomizer(true);
   };
 
+  // Handle view credentials
+  const handleViewCredentials = (company: Company) => {
+    setSelectedClient(company);
+    setShowClientDetails(false);
+    setShowCredentials(true);
+  };
+
+  // Handle view reports
+  const handleViewReports = (company: Company) => {
+    setSelectedClient(company);
+    setShowClientDetails(false);
+    setShowReports(true);
+  };
+
+  // Handle save client config
+  const handleSaveClient = (config: Partial<Company>) => {
+    if (selectedClient) {
+      // Update existing client
+      setCompanies(prev =>
+        prev.map(c => c.id === selectedClient.id ? { ...c, ...config, updatedAt: new Date().toISOString() } : c)
+      );
+      showToast(`${config.name || selectedClient.name} updated successfully!`);
+    } else {
+      // Create new client
+      const newClient: Company = {
+        id: `client-${Date.now()}`,
+        name: config.name || 'New Client',
+        slug: config.slug || 'new-client',
+        industry: config.industry || 'technology',
+        size: config.size || 'medium',
+        logo: null,
+        favicon: null,
+        branding: config.branding || initialCompanies[0].branding,
+        features: config.features || initialCompanies[0].features,
+        adminEmail: config.adminEmail || '',
+        supportEmail: config.supportEmail || '',
+        subscriptionTier: config.subscriptionTier || 'professional',
+        subscriptionStatus: 'trial',
+        trialEndsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        learnerCount: 0,
+        activeEnrollments: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        createdBy: currentSalesPerson.id,
+        salesPerson: currentSalesPerson.name,
+        portalUrl: `${getBasePortalUrl()}?company=${config.slug}`,
+      };
+      setCompanies(prev => [...prev, newClient]);
+      showToast(`${newClient.name} created successfully!`);
+    }
+    setShowCustomizer(false);
+  };
+
+  // Handle invite learners
+  const handleInviteLearners = () => {
+    const emails = prompt('Enter learner emails (comma-separated):');
+    if (emails) {
+      showToast(`Invitation sent to ${emails.split(',').length} learners!`);
+    }
+  };
+
+  // Handle export all reports
+  const handleExportReports = () => {
+    let content = `Koenig Sales Portal - All Clients Report\n`;
+    content += `Generated: ${new Date().toLocaleString()}\n`;
+    content += `Sales Rep: ${currentSalesPerson.name}\n`;
+    content += `==========================================\n\n`;
+
+    companies.forEach((company) => {
+      content += `${company.name}\n`;
+      content += `-----------\n`;
+      content += `Industry: ${company.industry}\n`;
+      content += `Learners: ${company.learnerCount}\n`;
+      content += `Enrollments: ${company.activeEnrollments}\n`;
+      content += `Status: ${company.subscriptionStatus}\n`;
+      content += `Tier: ${company.subscriptionTier}\n\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sales_report_${formatDate(new Date().toISOString())}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast('Report exported successfully!');
+  };
+
+  // Handle customize portal (quick action)
+  const handleCustomizePortal = () => {
+    if (companies.length > 0) {
+      setSelectedClient(companies[0]);
+      setShowCustomizer(true);
+    } else {
+      handleNewClient();
+    }
+  };
+
+  // Open portal in new tab
+  const openPortal = (company: Company) => {
+    const baseUrl = getBasePortalUrl();
+    const url = `${baseUrl}?company=${company.slug}`;
+    window.open(url, '_blank');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Toast Notification */}
+      {toast && (
+        <div className={cn(
+          'fixed top-4 right-4 z-50 flex items-center gap-3 px-6 py-4 rounded-xl shadow-lg animate-slideIn',
+          toast.type === 'success' && 'bg-green-600 text-white',
+          toast.type === 'error' && 'bg-red-600 text-white',
+          toast.type === 'info' && 'bg-blue-600 text-white'
+        )}>
+          <CheckCircle className="w-5 h-5" />
+          <span>{toast.message}</span>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -210,16 +377,16 @@ export default function SalesDashboard() {
               <StatCard
                 icon={Building2}
                 label="Total Clients"
-                value={dashboardStats.totalClients}
-                subValue={`${dashboardStats.activeClients} active`}
+                value={companies.length}
+                subValue={`${companies.filter(c => c.subscriptionStatus === 'active').length} active`}
                 trend={+8}
                 color="cyan"
               />
               <StatCard
                 icon={Users}
                 label="Total Learners"
-                value={dashboardStats.totalLearners.toLocaleString()}
-                subValue={`${dashboardStats.activeLearners.toLocaleString()} active`}
+                value={companies.reduce((sum, c) => sum + c.learnerCount, 0).toLocaleString()}
+                subValue={`${Math.round(companies.reduce((sum, c) => sum + c.learnerCount, 0) * 0.8).toLocaleString()} active`}
                 trend={+12}
                 color="violet"
               />
@@ -313,15 +480,24 @@ export default function SalesDashboard() {
                     <Plus className="w-5 h-5" />
                     <span className="font-medium">Add New Client</span>
                   </button>
-                  <button className="w-full flex items-center gap-3 p-3 bg-violet-50 text-violet-700 rounded-xl hover:bg-violet-100 transition-colors">
+                  <button
+                    onClick={handleCustomizePortal}
+                    className="w-full flex items-center gap-3 p-3 bg-violet-50 text-violet-700 rounded-xl hover:bg-violet-100 transition-colors"
+                  >
                     <Palette className="w-5 h-5" />
                     <span className="font-medium">Customize Portal</span>
                   </button>
-                  <button className="w-full flex items-center gap-3 p-3 bg-green-50 text-green-700 rounded-xl hover:bg-green-100 transition-colors">
+                  <button
+                    onClick={handleInviteLearners}
+                    className="w-full flex items-center gap-3 p-3 bg-green-50 text-green-700 rounded-xl hover:bg-green-100 transition-colors"
+                  >
                     <UserPlus className="w-5 h-5" />
                     <span className="font-medium">Invite Learners</span>
                   </button>
-                  <button className="w-full flex items-center gap-3 p-3 bg-amber-50 text-amber-700 rounded-xl hover:bg-amber-100 transition-colors">
+                  <button
+                    onClick={handleExportReports}
+                    className="w-full flex items-center gap-3 p-3 bg-amber-50 text-amber-700 rounded-xl hover:bg-amber-100 transition-colors"
+                  >
                     <Download className="w-5 h-5" />
                     <span className="font-medium">Export Reports</span>
                   </button>
@@ -369,7 +545,8 @@ export default function SalesDashboard() {
               {filteredCompanies.map((company) => (
                 <div
                   key={company.id}
-                  className="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-lg transition-shadow"
+                  className="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-lg transition-all cursor-pointer"
+                  onClick={() => handleViewClient(company)}
                 >
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
@@ -384,7 +561,7 @@ export default function SalesDashboard() {
                         <p className="text-sm text-gray-500 capitalize">{company.industry}</p>
                       </div>
                     </div>
-                    <div className="relative">
+                    <div className="relative" onClick={(e) => e.stopPropagation()}>
                       <button className="p-1 hover:bg-gray-100 rounded-lg transition-colors">
                         <MoreVertical className="w-5 h-5 text-gray-400" />
                       </button>
@@ -413,7 +590,7 @@ export default function SalesDashboard() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => handleEditClient(company)}
                       className="flex-1 flex items-center justify-center gap-2 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -421,15 +598,20 @@ export default function SalesDashboard() {
                       <Edit className="w-4 h-4" />
                       Edit
                     </button>
-                    <a
-                      href={company.portalUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={() => handleViewCredentials(company)}
+                      className="flex items-center justify-center gap-2 py-2 px-3 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                      title="View Credentials"
+                    >
+                      <Key className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => openPortal(company)}
                       className="flex-1 flex items-center justify-center gap-2 py-2 bg-cyan-600 text-white rounded-lg text-sm font-medium hover:bg-cyan-700 transition-colors"
                     >
                       <ExternalLink className="w-4 h-4" />
                       View Portal
-                    </a>
+                    </button>
                   </div>
                 </div>
               ))}
@@ -440,9 +622,104 @@ export default function SalesDashboard() {
         {/* Analytics Tab */}
         {activeTab === 'analytics' && (
           <div className="space-y-6">
+            {/* Analytics Overview */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Learner Growth */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Learner Growth</h3>
+                <div className="space-y-4">
+                  {companies.slice(0, 5).map((company) => (
+                    <div key={company.id} className="flex items-center gap-4">
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-medium"
+                        style={{ backgroundColor: company.branding.primaryColor }}
+                      >
+                        {company.name.charAt(0)}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium text-gray-900">{company.name}</span>
+                          <span className="text-sm text-gray-500">{company.learnerCount} learners</span>
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.min(100, (company.learnerCount / 500) * 100)}%`,
+                              backgroundColor: company.branding.primaryColor,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Completion Rates */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Course Completion Rates</h3>
+                <div className="space-y-4">
+                  {courses.slice(0, 5).map((course) => (
+                    <div key={course.id} className="flex items-center gap-4">
+                      <div className="w-8 h-8 rounded-lg bg-cyan-100 flex items-center justify-center">
+                        <Award className="w-4 h-4 text-cyan-600" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium text-gray-900">{course.code}</span>
+                          <span className="text-sm text-gray-500">{course.completionRate}%</span>
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-cyan-500 rounded-full"
+                            style={{ width: `${course.completionRate}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Report Actions */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Analytics Dashboard</h2>
-              <p className="text-gray-500">Detailed analytics and reporting coming soon...</p>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Generate Reports</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <button
+                  onClick={handleExportReports}
+                  className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+                >
+                  <FileText className="w-6 h-6 text-cyan-600" />
+                  <span className="text-sm font-medium text-gray-700">All Clients Report</span>
+                </button>
+                <button
+                  onClick={() => {
+                    if (companies.length > 0) {
+                      handleViewReports(companies[0]);
+                    }
+                  }}
+                  className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+                >
+                  <TrendingUp className="w-6 h-6 text-green-600" />
+                  <span className="text-sm font-medium text-gray-700">Progress Report</span>
+                </button>
+                <button
+                  onClick={handleExportReports}
+                  className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+                >
+                  <Users className="w-6 h-6 text-violet-600" />
+                  <span className="text-sm font-medium text-gray-700">Engagement Report</span>
+                </button>
+                <button
+                  onClick={handleExportReports}
+                  className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+                >
+                  <DollarSign className="w-6 h-6 text-amber-600" />
+                  <span className="text-sm font-medium text-gray-700">Revenue Report</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -507,14 +784,44 @@ export default function SalesDashboard() {
         )}
       </main>
 
-      {/* Client Customizer Modal */}
+      {/* Modals */}
       {showCustomizer && (
         <ClientCustomizer
           client={selectedClient}
           onClose={() => setShowCustomizer(false)}
-          onSave={(config) => {
-            console.log('Saved config:', config);
-            setShowCustomizer(false);
+          onSave={handleSaveClient}
+        />
+      )}
+
+      {showCredentials && selectedClient && (
+        <CredentialsManager
+          company={selectedClient}
+          onClose={() => setShowCredentials(false)}
+        />
+      )}
+
+      {showReports && selectedClient && (
+        <ReportsManager
+          company={selectedClient}
+          onClose={() => setShowReports(false)}
+        />
+      )}
+
+      {showClientDetails && selectedClient && (
+        <ClientDetailsModal
+          company={selectedClient}
+          onClose={() => setShowClientDetails(false)}
+          onEdit={() => {
+            setShowClientDetails(false);
+            setShowCustomizer(true);
+          }}
+          onViewCredentials={() => {
+            setShowClientDetails(false);
+            setShowCredentials(true);
+          }}
+          onViewReports={() => {
+            setShowClientDetails(false);
+            setShowReports(true);
           }}
         />
       )}
